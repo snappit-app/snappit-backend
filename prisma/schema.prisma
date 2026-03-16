@@ -1,0 +1,127 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum LicenseStatus {
+  active
+  revoked
+  refunded
+}
+
+enum WebhookEventStatus {
+  pending
+  processing
+  processed
+  failed
+  ignored
+}
+
+enum EmailJobStatus {
+  pending
+  processing
+  sent
+  failed
+}
+
+model License {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  activationCodeHash  String        @unique @map("activation_code_hash")
+  activationCodeLast4 String        @map("activation_code_last4")
+  email               String
+  status              LicenseStatus @default(active)
+  maxDevices          Int           @default(2) @map("max_devices")
+  paddleTransactionId String        @unique @map("paddle_transaction_id")
+  paddleCustomerId    String?       @map("paddle_customer_id")
+  lastEventOccurredAt DateTime?     @map("last_event_occurred_at") @db.Timestamptz(6)
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  activations LicenseActivation[]
+  auditLogs   AuditLog[]
+
+  @@index([email], map: "licenses_email_idx")
+  @@index([status], map: "licenses_status_idx")
+  @@index([paddleCustomerId], map: "licenses_paddle_customer_id_idx")
+  @@map("licenses")
+}
+
+model LicenseActivation {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  licenseId     String    @map("license_id") @db.Uuid
+  deviceIdHash  String    @map("device_id_hash")
+  deviceName    String?   @map("device_name")
+  platform      String?
+  appVersion    String?   @map("app_version")
+  activatedAt   DateTime  @default(now()) @map("activated_at") @db.Timestamptz(6)
+  deactivatedAt DateTime? @map("deactivated_at") @db.Timestamptz(6)
+
+  license License @relation(fields: [licenseId], references: [id], onDelete: Cascade)
+
+  @@index([licenseId], map: "license_activations_license_id_idx")
+  @@index([licenseId, deactivatedAt], map: "license_activations_license_id_deactivated_at_idx")
+  @@index([deviceIdHash], map: "license_activations_device_id_hash_idx")
+  /// NOTE: unique (license_id, device_id_hash) for active rows should be added as a partial unique index in SQL migration.
+  @@map("license_activations")
+}
+
+model WebhookEvent {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId        String             @unique @map("event_id")
+  notificationId String?            @map("notification_id")
+  eventType      String             @map("event_type")
+  occurredAt     DateTime           @map("occurred_at") @db.Timestamptz(6)
+  status         WebhookEventStatus @default(pending)
+  payload        Json
+  attempts       Int                @default(0)
+  nextRetryAt    DateTime?          @map("next_retry_at") @db.Timestamptz(6)
+  errorMessage   String?            @map("error_message")
+  processedAt    DateTime?          @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, nextRetryAt], map: "webhook_events_status_next_retry_at_idx")
+  @@index([eventType], map: "webhook_events_event_type_idx")
+  @@map("webhook_events")
+}
+
+model EmailJob {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  template     String
+  toEmail      String         @map("to_email")
+  payload      Json
+  status       EmailJobStatus @default(pending)
+  attempts     Int            @default(0)
+  nextRetryAt  DateTime?      @map("next_retry_at") @db.Timestamptz(6)
+  errorMessage String?        @map("error_message")
+  sentAt       DateTime?      @map("sent_at") @db.Timestamptz(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, nextRetryAt], map: "email_jobs_status_next_retry_at_idx")
+  @@index([toEmail], map: "email_jobs_to_email_idx")
+  @@map("email_jobs")
+}
+
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  action    String
+  licenseId String?  @map("license_id") @db.Uuid
+  metadata  Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  license License? @relation(fields: [licenseId], references: [id], onDelete: SetNull)
+
+  @@index([licenseId], map: "audit_logs_license_id_idx")
+  @@index([action], map: "audit_logs_action_idx")
+  @@map("audit_logs")
+}
